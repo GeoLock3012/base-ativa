@@ -6,11 +6,11 @@
     let attentionStates = ["Ignição desligada", "Motor desligado", "Falha pontual de cobertura GSM", "Tensão da bateria baixa", "Bateria desconectada"];
     let currentVehiclesData = []; let currentChart = null; let currentFilter = "Todos"; let currentSearchTerm = ""; let isProcessing = false; let currentSortColumn = "status"; let currentSortDirection = "asc"; let currentPage = 1;
     
-    // O Canhão: Referência Global do CodeMirror
+    // Instância global do CodeMirror
     let cmEditor = null;
     
     const ITEMS_PER_PAGE = 100;
-    const MAX_LINES_LIMIT = 1500000; // Elevado para comportar o pipeline de 1 Milhão de linhas
+    const MAX_LINES_LIMIT = 1500000; 
     
     const statusOrder = ["Manutenção", "Verificar Frota", "Comunicação dentro de 7 dias", "Comunicação dentro de 72 horas", "Comunicação OK"];
     const statusColors = { "Comunicação OK": "#2C7A4D", "Comunicação dentro de 72 horas": "#E68A2E", "Comunicação dentro de 7 dias": "#F4B942", "Verificar Frota": "#6B4E9E", "Manutenção": "#C7362B" };
@@ -24,7 +24,6 @@
         currentFilter = "Todos"; currentSearchTerm = ""; currentSortColumn = "status"; currentSortDirection = "asc"; currentPage = 1;
         const companyInput = document.getElementById('companyName'); if (companyInput) companyInput.value = "";
         
-        // Limpa o CodeMirror se estiver instanciado
         if (cmEditor) cmEditor.setValue("");
         
         const searchInput = document.getElementById('searchInput'); if (searchInput) searchInput.value = "";
@@ -314,7 +313,6 @@
         if (!validateCompany()) { showToast("Atenção: O nome da empresa é obrigatório.", 3000); return; }
         if (isProcessing) { showToast("Processamento já em andamento."); return; }
         
-        // Extrai os dados do CodeMirror ao invés do textarea padrão
         const rawText = cmEditor ? cmEditor.getValue() : ""; 
         if (!rawText.trim()) { alert("Dados não detectados no sistema."); return; }
         
@@ -471,8 +469,10 @@
         const bindEvent = (id, event, handler) => { const el = document.getElementById(id); if(el) el.addEventListener(event, handler); };
         bindEvent('processBtn', 'click', executeBaseProcessing); bindEvent('exportPdfBtn', 'click', exportToPDF); bindEvent('exportCsvBtn', 'click', exportToCSV); bindEvent('exportExcelBtn', 'click', exportToExcel); bindEvent('closeModalBtn', 'click', closeModal); bindEvent('companyName', 'change', () => { getCompanyName(); validateCompany(); });
         
-        // INICIALIZAÇÃO DO CODEMIRROR NO LUGAR DO TEXTAREA
         const textAreaEl = document.getElementById('rawDataInput');
+        const pasteOverlay = document.getElementById('pasteOverlay');
+        const progressText = document.getElementById('pasteProgressText');
+
         if (textAreaEl && typeof window.CodeMirror !== 'undefined') {
             cmEditor = window.CodeMirror.fromTextArea(textAreaEl, {
                 lineNumbers: true,
@@ -480,17 +480,42 @@
                 theme: document.documentElement.getAttribute('data-theme') === 'dark' ? 'dracula' : 'default',
                 viewportMargin: 10
             });
+
+            // O SEGREDO ESTÁ AQUI: Interceptar o paste DE DENTRO do CodeMirror
+            cmEditor.on('paste', (cm, e) => {
+                e.preventDefault();
+                
+                // 1. Leitura SÍNCRONA imediata para não perder o objeto do clipboard
+                const text = e.clipboardData ? e.clipboardData.getData('text/plain') : (window.clipboardData ? window.clipboardData.getData('Text') : '');
+                
+                if (!text) {
+                    showToast("Área de transferência vazia.", 3000);
+                    return;
+                }
+
+                // 2. Mostra o overlay IMEDIATAMENTE
+                if (pasteOverlay) pasteOverlay.classList.remove('hidden');
+                if (progressText) progressText.textContent = "Alocando memória no editor...";
+
+                // 3. Joga a inserção pesada para a próxima micro-tarefa
+                setTimeout(() => {
+                    cm.setValue(text);
+                    
+                    // Dá um tempinho extra para a engine de renderização do CodeMirror pintar a tela
+                    setTimeout(() => {
+                        if (pasteOverlay) pasteOverlay.classList.add('hidden');
+                        const linesCount = (text.match(/\n/g) || []).length + 1;
+                        showToast(`${linesCount.toLocaleString()} linhas processadas.`, 3000);
+                    }, 100);
+                }, 15);
+            });
         }
         
-        // ROTA DE FUGA: UPLOAD DE CSV/TXT
         const csvUpload = document.getElementById('csvUpload');
         if (csvUpload) {
             csvUpload.addEventListener('change', (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
-                
-                const pasteOverlay = document.getElementById('pasteOverlay');
-                const progressText = document.getElementById('pasteProgressText');
                 
                 if (pasteOverlay) pasteOverlay.classList.remove('hidden');
                 if (progressText) progressText.textContent = "Lendo arquivo no disco...";
@@ -501,11 +526,7 @@
                     if (progressText) progressText.textContent = "Alocando memória no editor...";
                     
                     setTimeout(() => {
-                        if (cmEditor) {
-                            cmEditor.setValue(text);
-                        } else {
-                            textAreaEl.value = text;
-                        }
+                        if (cmEditor) cmEditor.setValue(text);
                         if (pasteOverlay) pasteOverlay.classList.add('hidden');
                         csvUpload.value = ''; 
                         showToast(`Arquivo carregado com sucesso.`, 3000);
