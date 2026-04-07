@@ -6,10 +6,7 @@
     let attentionStates = ["Ignição desligada", "Motor desligado", "Falha pontual de cobertura GSM", "Tensão da bateria baixa", "Bateria desconectada"];
     let currentVehiclesData = []; let currentChart = null; let currentFilter = "Todos"; let currentSearchTerm = ""; let isProcessing = false; let currentSortColumn = "status"; let currentSortDirection = "asc"; let currentPage = 1;
     
-    // O Canhão: Referência Global do CodeMirror
     let cmEditor = null;
-    
-    // O Cofre: Variável da Colagem Fantasma (Phantom Paste)
     let phantomMemoryPayload = null; 
     
     const ITEMS_PER_PAGE = 100;
@@ -27,7 +24,6 @@
         currentFilter = "Todos"; currentSearchTerm = ""; currentSortColumn = "status"; currentSortDirection = "asc"; currentPage = 1;
         const companyInput = document.getElementById('companyName'); if (companyInput) companyInput.value = "";
         
-        // Esvazia o cofre e o editor
         phantomMemoryPayload = null;
         if (cmEditor) cmEditor.setValue("");
         
@@ -318,13 +314,8 @@
         if (!validateCompany()) { showToast("Atenção: O nome da empresa é obrigatório.", 3000); return; }
         if (isProcessing) { showToast("Processamento já em andamento."); return; }
         
-        // PUXA DO COFRE SE EXISTIR, SENÃO PUXA DO EDITOR
         const rawText = phantomMemoryPayload !== null ? phantomMemoryPayload : (cmEditor ? cmEditor.getValue() : ""); 
-        
-        if (!rawText.trim() || rawText.startsWith('📦')) { 
-            alert("Nenhum dado válido carregado no sistema."); 
-            return; 
-        }
+        if (!rawText.trim() || rawText.startsWith('📦')) { alert("Dados válidos não detectados no sistema."); return; }
         
         isProcessing = true;
         const processBtn = document.getElementById('processBtn'); const pdfBtn = document.getElementById('exportPdfBtn'); const csvBtn = document.getElementById('exportCsvBtn'); const excelBtn = document.getElementById('exportExcelBtn');
@@ -490,8 +481,11 @@
                 viewportMargin: 10
             });
 
-            // O MOTOR PHANTOM PASTE PURO (A Mágica da Velocidade)
-            cmEditor.on('paste', async (cm, e) => {
+            // O ESCUDO ANTI-BOMBA (Fase de Captura)
+            const cmWrapper = cmEditor.getWrapperElement();
+            cmWrapper.addEventListener('paste', async (e) => {
+                // Interrompe a propagação ANTES do CodeMirror saber que houve um paste
+                e.stopPropagation();
                 e.preventDefault();
                 
                 const text = e.clipboardData ? e.clipboardData.getData('text/plain') : (window.clipboardData ? window.clipboardData.getData('Text') : '');
@@ -499,19 +493,19 @@
 
                 if (pasteOverlay) pasteOverlay.classList.remove('hidden');
 
-                // Força a repintura da tela para exibir o overlay antes de qualquer bloqueio
+                // Força a tela a desenhar o overlay antes de congelar
                 await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
                 setTimeout(() => {
                     const linesCount = (text.match(/\n/g) || []).length + 1;
 
-                    // O Limiar (acima de 1000 linhas, dropa na memória e poupa a CPU)
+                    // O Limiar de Segurança
                     if (linesCount > 1000) {
                         phantomMemoryPayload = text;
-                        cm.setValue(`📦 ${linesCount.toLocaleString()} registros carregados em memória.\n\n⚠️ O texto bruto não será renderizado aqui para evitar travamentos visuais.\n👉 O sistema puxará os dados direto da memória RAM ao clicar em "Processar Base".\n\n(Se você apagar ou editar este texto, a memória será limpa).`);
+                        cmEditor.setValue(`📦 ${linesCount.toLocaleString()} registros carregados em memória.\n\n⚠️ O texto bruto não será renderizado aqui para evitar travamentos visuais.\n👉 O sistema puxará os dados direto da memória RAM ao clicar em "Processar Base".\n\n(Se você apagar ou editar este texto, a memória será limpa).`);
                     } else {
                         phantomMemoryPayload = null;
-                        cm.setValue(text);
+                        cmEditor.setValue(text);
                     }
                     
                     requestAnimationFrame(() => {
@@ -519,9 +513,9 @@
                         showToast(`Base carregada: ${linesCount.toLocaleString()} linhas.`, 3000);
                     });
                 }, 15);
-            });
+            }, true); // TRUE = Ativa a fase de captura do DOM
 
-            // Se o usuário mexer no texto de placeholder, invalida a memória
+            // Limpa a memória se o usuário deletar a mensagem de placeholder
             cmEditor.on('change', (cm, changeObj) => {
                 if (changeObj.origin !== 'setValue' && phantomMemoryPayload !== null) {
                     phantomMemoryPayload = null;
@@ -529,7 +523,7 @@
             });
         }
         
-        // ROTA DE FUGA: UPLOAD PARA ARQUIVOS GIGANTES
+        // ROTA DE FUGA PARA ARQUIVOS CSV
         const csvUpload = document.getElementById('csvUpload');
         if (csvUpload) {
             csvUpload.addEventListener('change', (e) => {
